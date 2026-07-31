@@ -1,0 +1,4 @@
+PCJ Raspberry
+Version 3.0
+Fecha: 23/07/2026
+Estado: Estable

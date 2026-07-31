@@ -1,0 +1,15 @@
+# Datos locales: nunca se comparten ni se suben al repositorio.
+PCJ-Raspberry.ini
+Backups/
+Informes/
+Keys/*
+!Keys/README.txt
+
+# Archivos de distribución generados localmente.
+Releases/
+*.zip
+*.img.gz
+
+# Integraciones visuales creadas para esta PC.
+desktop.ini
+*.lnk

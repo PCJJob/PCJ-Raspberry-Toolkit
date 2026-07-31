@@ -1,0 +1,3 @@
+# Huella del paquete oficial PCJ Raspberry Toolkit 3.0.0
+# Esta huella corresponde al archivo Releases\PCJ-Raspberry-3.0.0.zip.
+dac9cea4dbe0a12751f4f62e3ff6762add6dfbbed4b53244469214d31bbc4dee  PCJ-Raspberry-3.0.0.zip
