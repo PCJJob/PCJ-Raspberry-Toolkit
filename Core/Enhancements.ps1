@@ -158,27 +158,127 @@ function Show-RaspberryTimeAssistant
 function Show-RaspberryIpReservationGuide
 {
     param([string]$RaspberryHost, [string]$User)
-    Clear-Host
-    Write-UIHeader -Title "Reservar IP en el router"
-    Write-Host ""
-    Write-Host "Una reserva evita que cambie la IP que usan Pi-hole, SSH y este programa." -ForegroundColor Cyan
-    Write-Host "No modifica nada automaticamente: cada router tiene un menu diferente." -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "1. Obtener datos de la Raspberry" -ForegroundColor White
-    Write-Host "   Muestra IP, direccion fisica y puerta de enlace para anotarlas en el router." -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "2. Cancelar y volver" -ForegroundColor DarkGray
-    Write-Host ""
-    if((Read-UIChoice) -ne '1'){return}
-    $result=Invoke-SSHScript -RaspberryHost $RaspberryHost -User $User -Script "echo IP=`$(hostname -I | awk '{print `$1}'); echo MAC=`$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address 2>/dev/null); echo ROUTER=`$(ip route | awk '/default/ {print `$3; exit}')"
-    $v=Get-PCJKeyValueOutput $result
-    Write-Host ""
-    Write-Host "IP actual de la Raspberry: $($v['IP'])" -ForegroundColor Green
-    Write-Host "Direccion fisica (MAC): $($v['MAC'])" -ForegroundColor Green
-    Write-Host "Direccion del router: $($v['ROUTER'])" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "En el router busque: Reserva DHCP, Direccion IP reservada o Static lease." -ForegroundColor Cyan
-    Write-Host "Cree una reserva usando la MAC mostrada y la IP actual de la Raspberry." -ForegroundColor Cyan
+    $networkScript = @'
+route=$(ip route | awk '/default/ {print; exit}')
+iface=$(printf '%s\n' "$route" | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+router=$(printf '%s\n' "$route" | awk '{for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')
+ip=$(ip -4 -o addr show dev "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null)
+echo "IP=$ip"
+echo "MAC=$mac"
+echo "ROUTER=$router"
+echo "INTERFAZ=$iface"
+'@
+
+    while ($true)
+    {
+        Clear-Host
+        Write-UIHeader -Title "Asistente: IP fija para la Raspberry"
+        Write-Host ""
+        Write-Host "Una reserva DHCP hace que el router entregue siempre la misma IP a esta Raspberry." -ForegroundColor Cyan
+        Write-Host "Es recomendable para Pi-hole, SSH y esta herramienta: evita perder el acceso si el router cambia la IP." -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "No cambia la red de la Raspberry automaticamente. La reserva se crea desde la configuracion de su router." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Que desea hacer?" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "1. Ver datos para crear la reserva" -ForegroundColor White
+        Write-Host "   Muestra la IP, direccion MAC y router que debe usar en la configuracion del modem/router." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "2. Ver instrucciones paso a paso" -ForegroundColor White
+        Write-Host "   Explica donde crear la reserva DHCP y que datos copiar." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "3. Comprobar despues de crear la reserva" -ForegroundColor White
+        Write-Host "   Confirma la IP actual. Tras reiniciar la Raspberry, debe conservar la IP reservada." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "4. Cancelar y volver" -ForegroundColor DarkGray
+        Write-Host ""
+
+        switch (Read-UIChoice)
+        {
+            '1'
+            {
+                Show-UIProgress -Stage "Consultando datos de red de la Raspberry..." -Percent 50
+                $v = Get-PCJKeyValueOutput (Invoke-SSHScript -RaspberryHost $RaspberryHost -User $User -Script $networkScript)
+                Show-UIProgress -Stage "Datos de red listos." -Percent 100
+                Complete-UIProgress
+                Write-Host ""
+                if ([string]::IsNullOrWhiteSpace($v['IP']) -or [string]::IsNullOrWhiteSpace($v['MAC']))
+                {
+                    Write-Host "[ERROR] No se pudieron obtener los datos de red. Compruebe que la Raspberry siga conectada." -ForegroundColor Red
+                }
+                else
+                {
+                    Write-Host "Datos que debe anotar:" -ForegroundColor Cyan
+                    Write-Host "IP actual de la Raspberry: $($v['IP'])" -ForegroundColor Green
+                    Write-Host "Direccion fisica (MAC):   $($v['MAC'])" -ForegroundColor Green
+                    Write-Host "Conexion usada:           $($v['INTERFAZ'])" -ForegroundColor Green
+                    Write-Host "Direccion del router:     $($v['ROUTER'])" -ForegroundColor Green
+                    Write-Host ""
+                    Write-Host "Use la MAC de la conexion mostrada arriba. Si dice wlan0, es Wi-Fi; si dice eth0, es cable de red." -ForegroundColor Yellow
+                }
+                Pause
+            }
+            '2'
+            {
+                $v = Get-PCJKeyValueOutput (Invoke-SSHScript -RaspberryHost $RaspberryHost -User $User -Script $networkScript)
+                Write-Host ""
+                Write-Host "PASO 1. Abra en el navegador la direccion del router:" -ForegroundColor White
+                Write-Host "         http://$($v['ROUTER'])" -ForegroundColor Green
+                Write-Host "         Si no abre, revise la etiqueta del modem/router o consulte a su proveedor de Internet." -ForegroundColor DarkGray
+                Write-Host ""
+                Write-Host "PASO 2. Inicie sesion en su modem/router." -ForegroundColor White
+                Write-Host ""
+                Write-Host "Donde encuentro la Reserva DHCP?" -ForegroundColor Cyan
+                Write-Host "La ubicacion y el nombre cambian segun la marca y el modelo de su router o modem." -ForegroundColor DarkGray
+                Write-Host "Busque una opcion relacionada con DHCP, direcciones IP o vinculacion entre IP y MAC." -ForegroundColor DarkGray
+                Write-Host "En muchos equipos se encuentra dentro de la configuracion de LAN, Red o DHCP." -ForegroundColor DarkGray
+                Write-Host ""
+                Write-Host "Nombres que puede tener esta funcion:" -ForegroundColor Cyan
+                Write-Host "Reserva de direccion | Reserva DHCP | DHCP Reservation | Address Reservation" -ForegroundColor White
+                Write-Host "Static DHCP | IP Reservation | Reserved IP | IP & MAC Binding" -ForegroundColor White
+                Write-Host "DHCP Static Lease | Static Lease | Vinculacion IP/MAC | Asignacion estatica DHCP" -ForegroundColor White
+                Write-Host ""
+                Write-Host "Rutas frecuentes (son solo ejemplos; busque la opcion equivalente en su equipo):" -ForegroundColor Yellow
+                Write-Host "- TP-Link Deco: Mas > Avanzado > Reserva de direccion" -ForegroundColor DarkGray
+                Write-Host "- Otros routers: Configuracion avanzada > DHCP > Reserva DHCP" -ForegroundColor DarkGray
+                Write-Host "- Red / LAN > Servidor DHCP > Reserva de direcciones" -ForegroundColor DarkGray
+                Write-Host "- Avanzado > Red > DHCP > DHCP Reservation" -ForegroundColor DarkGray
+                Write-Host "- LAN > DHCP Server > Address Reservation" -ForegroundColor DarkGray
+                Write-Host "- Network > LAN > DHCP > Static Lease" -ForegroundColor DarkGray
+                Write-Host "- DHCP > IP & MAC Binding" -ForegroundColor DarkGray
+                Write-Host ""
+                Write-Host "PASO 3. Cree una nueva reserva con estos datos:" -ForegroundColor White
+                Write-Host "         Direccion MAC: $($v['MAC'])" -ForegroundColor Green
+                Write-Host "         IP reservada:  $($v['IP'])" -ForegroundColor Green
+                Write-Host ""
+                Write-Host "PASO 4. Guarde los cambios. Reinicie la Raspberry solo si el router lo solicita o cuando termine de configurar." -ForegroundColor White
+                Write-Host ""
+                Write-Host "IMPORTANTE: No elija una IP distinta sin saber que esta libre. Reservar la IP actual es la opcion mas sencilla y segura." -ForegroundColor Yellow
+                Pause
+            }
+            '3'
+            {
+                Show-UIProgress -Stage "Comprobando la IP actual..." -Percent 50
+                $v = Get-PCJKeyValueOutput (Invoke-SSHScript -RaspberryHost $RaspberryHost -User $User -Script $networkScript)
+                Show-UIProgress -Stage "Comprobacion terminada." -Percent 100
+                Complete-UIProgress
+                Write-Host ""
+                if ($v['IP'])
+                {
+                    Write-Host "[OK] La Raspberry esta conectada y actualmente usa la IP: $($v['IP'])" -ForegroundColor Green
+                    Write-Host "Si coincide con la IP que guardo en el router despues de reiniciarla, la reserva funciona correctamente." -ForegroundColor Cyan
+                }
+                else
+                {
+                    Write-Host "[ERROR] No se pudo comprobar la IP. Revise la conexion de la Raspberry." -ForegroundColor Red
+                }
+                Pause
+            }
+            '4' { return }
+            default { return }
+        }
+    }
 }
 
 function Show-PiHoleInsights

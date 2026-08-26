@@ -13,6 +13,10 @@ $reportsFolder = Join-Path $PSScriptRoot "..\Informes"
 
 Initialize-PCJDesktopIntegration -ProgramRoot (Split-Path -Parent $PSScriptRoot)
 
+# Repara automaticamente una configuracion antigua que se haya guardado sin
+# saltos de linea. No modifica perfiles ni llaves SSH.
+Repair-PCJConfigFile -ConfigFile $configFile | Out-Null
+
 $requiresSetup = -not (Test-Path $configFile)
 
 if (-not $requiresSetup)

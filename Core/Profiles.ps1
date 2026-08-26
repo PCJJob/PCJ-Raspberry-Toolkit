@@ -14,7 +14,14 @@ function Set-PCJIniValue
         [string]$Value
     )
 
-    $lines = if (Test-Path $File) { @(Get-Content -LiteralPath $File) } else { @() }
+    # Al iniciar con un archivo inexistente, una matriz vacia puede convertirse
+    # en una cadena al agregar el primer valor. Construimos la matriz de forma
+    # explicita para conservar una entrada por linea.
+    $lines = @()
+    if (Test-Path $File)
+    {
+        $lines += @(Get-Content -LiteralPath $File)
+    }
     $insideSection = $false
     $sectionFound = $false
 
@@ -35,7 +42,9 @@ function Set-PCJIniValue
         if ($insideSection -and $lines[$index] -match "^(.+?)=(.*)$" -and $Matches[1].Trim() -eq $Key)
         {
             $lines[$index] = "$Key=$Value"
-            Set-Content -LiteralPath $File -Value $lines
+            # WriteAllLines conserva cada elemento como una linea independiente.
+            # Esto evita que un archivo INI se guarde todo junto y deje de poder leerse.
+            [System.IO.File]::WriteAllLines($File, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
             return
         }
     }
@@ -51,7 +60,85 @@ function Set-PCJIniValue
     }
 
     $lines += "$Key=$Value"
-    Set-Content -LiteralPath $File -Value $lines
+    [System.IO.File]::WriteAllLines($File, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
+}
+
+
+function Repair-PCJConfigFile
+{
+    param([string]$ConfigFile)
+
+    if (-not (Test-Path -LiteralPath $ConfigFile))
+    {
+        return $false
+    }
+
+    $raw = Get-Content -LiteralPath $ConfigFile -Raw
+
+    # Los archivos correctos tienen una opcion por linea. Esta reparacion solo se
+    # activa para un archivo claramente dañado que contiene todas las secciones juntas.
+    if ($raw -notmatch "\[Profiles\].*\[Raspberry\]")
+    {
+        return $false
+    }
+
+    $getValue = {
+        param([string]$Section, [string]$Key)
+        $match = [regex]::Match($raw, "\[$([regex]::Escape($Section))\]$([regex]::Escape($Key))=(.*?)(?=\[|$)")
+        if ($match.Success) { return $match.Groups[1].Value.Trim() }
+        return ""
+    }
+
+    $activeId = & $getValue "Profiles" "ActiveId"
+    $raspberryHost = & $getValue "Raspberry" "Host"
+    $user = & $getValue "Raspberry" "User"
+    $backupDestination = & $getValue "Backups" "Destination"
+    $ownerUser = & $getValue "Installation" "OwnerUser"
+    $ownerComputer = & $getValue "Installation" "OwnerComputer"
+
+    $profiles = @(Get-PCJSavedProfiles)
+    $profile = $profiles | Where-Object { $_.Id -eq $activeId } | Select-Object -First 1
+    if (-not $profile)
+    {
+        $profile = $profiles | Select-Object -First 1
+    }
+
+    if ($profile)
+    {
+        $activeId = $profile.Id
+        $raspberryHost = $profile.Host
+        $user = $profile.User
+    }
+
+    if ([string]::IsNullOrWhiteSpace($activeId) -or
+        [string]::IsNullOrWhiteSpace($raspberryHost) -or
+        [string]::IsNullOrWhiteSpace($user))
+    {
+        return $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($backupDestination)) { $backupDestination = ".\Backups" }
+    if ([string]::IsNullOrWhiteSpace($ownerUser)) { $ownerUser = $env:USERNAME }
+    if ([string]::IsNullOrWhiteSpace($ownerComputer)) { $ownerComputer = $env:COMPUTERNAME }
+
+    $cleanLines = @(
+        "[Profiles]",
+        "ActiveId=$activeId",
+        "",
+        "[Raspberry]",
+        "Host=$raspberryHost",
+        "User=$user",
+        "",
+        "[Backups]",
+        "Destination=$backupDestination",
+        "",
+        "[Installation]",
+        "OwnerUser=$ownerUser",
+        "OwnerComputer=$ownerComputer"
+    )
+
+    [System.IO.File]::WriteAllLines($ConfigFile, [string[]]$cleanLines, [System.Text.UTF8Encoding]::new($false))
+    return $true
 }
 
 
